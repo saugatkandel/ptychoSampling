@@ -1,5 +1,5 @@
 from setuptools import setup
-
+"""
 setup(
     name='ptychoSampling',
     version='0.0.1',
@@ -18,3 +18,4 @@ setup(
         "autograd"
     ],
 )
+"""
