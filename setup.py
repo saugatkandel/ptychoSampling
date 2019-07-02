@@ -13,7 +13,7 @@ setup(
         "scipy",
         "skimage",
         "matplotlib",
-        "tensorflow",
+        "tensorflow-gpu",
         "tqdm",
         "autograd"
     ],
