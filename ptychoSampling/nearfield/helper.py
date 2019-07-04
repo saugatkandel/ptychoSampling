@@ -11,28 +11,26 @@ import tensorflow as tf
 import attr
 from tqdm import tqdm_notebook as tqdm
 from pandas import DataFrame
+from dataclasses import dataclass
 
 
 
 def getSampleObj(npix: int = 256, 
                  mod_range: float = 1, 
                  phase_range: float = np.pi)-> np.ndarray:
-    """Creates a sample complex-valued object using stock data from the skimage library.
+    r"""Creates a sample complex-valued object using stock data from the skimage library.
     
-    Uses the stock camera image for the phase and the 
-    stock immunohistochemistry image (channel 0) for the modulus [1].
+    Uses the stock camera image for the phase and the stock immunohistochemistry image (channel 0) for the modulus [1]_.
     
     Parameters
     ----------
-    npix : 
+    npix : int
         Number of pixels in each axis of the object
-    
-    mod_range : 
+    mod_range : float 
         Maximum value of the modulus for the object pixels.
-    
-    phase_range : 
+    phase_range : float
         Maximum value of the phase for the object pixels.
-    
+
     Returns
     -------
     out : complex ndarray
@@ -41,7 +39,6 @@ def getSampleObj(npix: int = 256,
     References
     ----------
     .. [1] https://scikit-image.org/docs/dev/api/skimage.data.html
-    
     """
     
     phase_img = skimage.img_as_float(skimage.data.camera())[::-1,::-1]
@@ -66,33 +63,27 @@ def getSampleObj(npix: int = 256,
 def getGaussian2D(npix: int, 
                   stdev: Optional[float] = None,
                   fwhm: Optional[float] = None) -> np.ndarray:
-    """Generates a circularly symmetric 2d gaussian pattern. 
+    r"""Generates a circularly symmetric 2d gaussian pattern. 
+    
+    Ignoring the scaling constants, a circularly symmetric 2d gaussian can be calculated as:
+    
+    .. math:: g = \exp\left(-\frac{(x - c_x)^2 + (y - c_y)^2}{2 * stdev^2}\right)
+    
+    where :math:`(x,y)` are the coordinate indices, :math:`(c_x, c_y)` are the coordinates for the center of the gaussian, and stdev is the standard deviation. In this function, we assume that :math:`c_x = c_y = npix // 2` (i.e. the center of the gaussian is the center of the 2d array).
     
     Parameters
     ----------
-
-    npix : 
+    npix : int
         Number of pixels in each axis of the probe
-    
-    stdev : 
+    stdev : :obj:`float`, optional
         Standard deviation of the gaussian. The function requires either the standard deviation or the fwhm. 
+    fwhm : :obj:`float`, optional
+        Full width at half maximum (FWHM) of the peak. The function requires either the standard deviation or the fwhm. If we supply the fwhm, the standard deviation is calculated as :math:`stdev = fwhm / 2.35682`.
     
-    fwhm :
-        Full width at half maximum (FWHM) of the peak. The function requires either the standard deviation
-        or the fwhm. If we supply the fwhm, the standard deviation is calculated as
-        :math:`stdev = fwhm / 2.35682`.
-    
-    Returns: 
-    A 2d array of shape npix X npix and dtype float32.
-    
-    Notes
-    -----
-    Ignoring the scaling constants, a circularly symmetric 2d gaussian can be calculated as:
-    .. math:: g = \exp\left(-\frac{(x - cx)^2 + (y - cy)^2}{2 * stdev^2}\right)
-    
-    where x and y are the coordinate indices, cx and cy are the coordinates for the center
-    of the gaussian, and stdev is the standard deviation. In this function, we assume that 
-    :math:`cx = cy = npix // 2` (i.e. the center of the gaussian is the center of the 2d array).
+    Returns
+    -------
+    out: float ndarray
+        A 2d array of shape npix X npix and dtype float32.
     """
     
     
@@ -117,46 +108,39 @@ def getTFPropKernel(beam_shape: tuple,
                     wavelength: float, 
                     prop_dist: float,
                     fftshift: bool = True) -> np.ndarray:
-    """Generates a kernel for wavefield propagation using the Transfer function method. 
+    r"""Generates a kernel for wavefield propagation using the Transfer function method. 
     
-    This implementation is adapted slightly from the MATLAB algorithm in Chapter 5.1 of the book 
-    "Computational Fourier Optics: A MATLAB Tutorial" by David Voelz (2011). 
-    The expression used is:
-    H(f_x, f_y) = exp(-j pi lambda z (f_x^2 + f_y^2))
-    where f_x and f_y are the coordinates in reciprocal space (which are calculated using the pixel pitch),
-    z is the propagation distance, and lambda is the wavelength.
+    This implementation is adapted slightly the reference algorithm in [2]_. The expression used is:
     
-    Note that this is equivalent to the angular spectrum propagator used in Equation 14 in 
-    https://www.osapublishing.org/oe/fulltext.cfm?uri=oe-27-13-18653&id=414640
-    which is itself sourced from Equation 4 in
-    https://www.osapublishing.org/oe/abstract.cfm?uri=oe-23-15-19728
+    .. math:: H(f_x, f_y) = \exp\left(-j \pi \lambda z (f_x^2 + f_y^2)\right)
     
-    In these equations, we see the coordinates (q_x, q_y) and (u, v)---these are the *angular* coordinates,
-    which correspond to the *frequency* coordinates used herein, i.e. (q_x = u = 2 * pi * f_x).
+    where :math:`(f_x, f_y)` are the coordinates in reciprocal space (which are calculated using the pixel pitch), :math:`z` is the propagation distance, and :math:`\lambda` is the wavelength.
     
-    Parameters:
+    Note that this is equivalent to the angular spectrum propagator used in Equation 14 in [3]_ , which is itself sourced from Equation 4 in [4]_. In these equations, we see the coordinates :math:`(q_x, q_y)` and :math:`(u, v)`---these are the *angular* coordinates, which correspond to the *frequency* coordinates used herein, i.e. :math:`(q_x = u = 2 * \pi * f_x)`.
     
-    beam_shape - 
-    A tuple for the shape of the array containing the propagation kernel.
+    Parameters
+    ----------
+    beam_shape : tuple(int, int)
+        A tuple for the shape of the array containing the propagation kernel.
+    pixel_pitch : float
+        Pixel pitch at plane containing the initial wavefront (in SI units).
+    wavelength : float
+        Wavelength of the propagated wave (in SI units).
+    prop_dist : float
+        Propagation distance (in SI units).
+    fftshift : bool
+        Whether to return the kernel after performing an fftshift. Since we most often use the output kernel (H) inside the structure IFFT(FFT(psi) * H) where psi is the wavefront that we need to propagate, it is convenient to deal with the shifted kernel directly. 
     
-    pixel_pitch - 
-    Pixel pitch at plane containing the initial wavefront (in SI units).
+    Returns
+    --------
+    out : complex ndarray
+        A 2d array of shape beam_shape and dtype complex64.
     
-    wavelength - 
-    Wavelength of the propagated wave (in SI units).
-    
-    prop_dist - 
-    Propagation distance (in SI units).
-    
-    fftshift - 
-    Whether to return the kernel after performing an fftshift. 
-    Since we most often use the output kernel (H) inside the structure 
-    IFFT(FFT(psi) * H)
-    where psi is the wavefront that we need to propagate, it is convenient 
-    to deal with the shifted kernel directly. 
-    
-    Returns:
-    A 2d array of shape beam_shape and dtype complex64.
+    References
+    ----------
+    .. [2] Chapter 5.1 of the book "Computational Fourier Optics: A MATLAB Tutorial" by David Voelz (2011).
+    .. [3] Saugat Kandel, S. Maddali, Marc Allain, Stephan O. Hruszkewycz, Chris Jacobsen, and Youssef S. G. Nashed, "Using automatic differentiation as a general framework for ptychographic reconstruction," Opt. Express 27, 18653-18672 (2019)
+    .. [4] Richard M. Clare, Marco Stockmar, Martin Dierolf, Irene Zanette, and Franz Pfeiffer, "Characterization of near-field ptychography," Opt. Express 23, 19728-19742 (2015)
     """
     
     M, N = beam_shape
@@ -179,26 +163,20 @@ def getSpeckle(npix: int,
                window_size: int) -> np.ndarray:
     """Generates a speckle pattern. 
     
-    To generate a speckle pattern, this function uses a window_size x window_size
-    array of complex numbers with unit amplitude and uniformly random phase.
-    This array is padded with zeros to get an npix x npix array, an FFT of which
-    gives us a speckle pattern. The speckle pattern thus generated is discontinuous;
-    there is a phase step of pi between adjacent pixels in both the x and y directions.
-    We remove these discontinuities to get the final, continuous, speckle pattern.
+    To generate a speckle pattern, this function uses a window_size x window_size array of complex numbers with unit amplitude and uniformly random phase. This array is padded with zeros to get an npix x npix array, an FFT of which gives us a speckle pattern. The speckle pattern thus generated is discontinuous; there is a phase step of pi between adjacent pixels in both the x and y directions. We remove these discontinuities to get the final, continuous, speckle pattern.
     
-    Parameters:
-    
-    npix - 
-    Number of pixels along each side of the 2d array containing the speckle pattern.
-    
-    window_size - 
-    The size of the rectangular window used to generate the speckle pattern. 
-    Larger window sizes give smaller speckle sizes and vice versa. 
-    (Note: I tried a circular window as well, but the results did not change 
+    Parameters
+    ----------
+    npix : int
+        Number of pixels along each side of the 2d array containing the speckle pattern.
+    window_size : int 
+        The size of the rectangular window used to generate the speckle pattern. Larger window sizes give smaller speckle sizes and vice versa. (*Note*: I tried a circular window as well, but the results did not change 
     noticeably.)
     
-    Returns:
-    A 2d array of size npix x npix and dtype complex64.
+    Returns
+    --------
+    out : complex ndarray
+        A 2d array of size npix x npix and dtype complex64.
     """
     
     if window_size > npix: 
@@ -230,230 +208,221 @@ def getSpeckle(npix: int,
 
 
 
-class ObjParams(object):
+@dataclass(frozen=True)
+class ObjParams:
     """Convenience class to store the object parameters.
-        
-        Parameters:
-        
-        obj_npix - 
+    
+    Note
+    -----
+    Adding an assumed-known border (filled with ones) to the object helps avoid the affine phase ambiguity.
+    
+    Attributes
+    ----------
+    obj_npix : int
         Number of pixels in each side of the (square) object to be generated.
-        
-        mod_range - 
+    mod_range : float
         Maximum value of the modulus for the object pixels.
-    
-        phase_range - 
+    phase_range : float
         Maximum value of the phase for the object pixels. 
-        
-        border_npix - 
-        Number of pixels to add along the border in the left, right, top, and bottom 
-        margins of the object. If border_npix = 10, then the simulation adds 10 pixels
-        to the left of the object, and 10 pixels to the right of the object, i.e. a total
-        of 20 pixels along the x-direction (and similarly with y).
-        
-        Adding an assumed-known border (filled with ones) to the object
-        helps avoid the affine phase ambiguity. 
-        
-        border_const - 
+    border_npix : int
+        Number of pixels to add along the border in the left, right, top, and bottom margins of the object. If :obj:`border_npix = 10`, then the simulation adds 10 pixels to the left of the object, and 10 pixels to the right of the object, i.e. a total of 20 pixels along the x-direction (and similarly with y). 
+    border_const : float
         Constant value to fill the border with.
-        """
-    def __init__(self, 
-                 obj_npix: int = 192,
-                 mod_range: float = 1.0,
-                 phase_range: float = np.pi,
-                 border_npix: int = 32,
-                 border_const: float = 1.0) -> None:
-        
-        self.obj_npix = obj_npix
-        self.mod_range = mod_range
-        self.phase_range = phase_range
-        self.border_npix = border_npix
-        self.border_const = border_const
-        self.obj_w_border_npix = self.obj_npix + 2 * self.border_npix
+    """
+    obj_npix: int
+    mod_range: float
+    phase_range: float
+    border_npix: int
+    border_const: float
     
-class ProbeParams(object):
-    def __init__(self, 
-                 wavelength: float = 0.142e-9, #(m)
-                 npix: int = 512,
-                 photons_flux: float = 1e4) -> None:
-        """Convenience class to store the probe parameters.
-        
-        Parameters:
-        
-        wavelength - 
+    @property
+    def obj_w_border_npix(self) -> int:
+        """Total number of pixels (including object and border) in each side of the object."""
+        return self.obj_npix + 2 * self.border_npix
+
+@dataclass(frozen=True)
+class ProbeParams:
+    """Convenience class to store the probe parameters.
+
+    Attributes
+    ----------
+    wavelength : float
         Wavelength of the probe beam.
-        
-        npix - 
+    npix : int
         Number of pixels in each side of the square probe to be generated.
-    
-        photons_flux - 
+    photons_flux : float 
         Average number of photons per pixel in the probe beam. 
-        """
-        
-        self.wavelength = wavelength
-        self.npix = npix
-        self.photons_flux = photons_flux
-        self.n_photons = self.photons_flux * self.npix**2
+    """
+    wavelength: float
+    npix: int
+    photons_flux: float
+    
+    @property
+    def n_photons(self) -> float:
+        """Total number of photons in the beam."""
+        return self.photons_flux * self.npix**2
 
-class DetectorParams(object):
-    def __init__(self, 
-                 obj_dist: float = 0.0468,
-                 pixel_pitch: float = 3e-7) -> None:
-        """Convenience class to store the detector parameters.
-        Parameters:
-        
-        obj_dist - 
+@dataclass(frozen=True)
+class DetectorParams:
+    """Convenience class to store the detector parameters.
+    
+    Attributes
+    -----------
+    obj_dist : float
         Object-detector distance (in m).
-        
-        pixel_pitch - 
+    pixel_pitch : float
         Width of each individual pixel (in m). 
-        """
-        self.obj_dist = obj_dist
-        self.pixel_pitch = pixel_pitch
-        
-class ScanParams(object):
-    def __init__(self, 
-                 scan_step_npix: int = 44,
-                 poisson_noise: bool = True) -> None:
-        """Convenience class to store the ptychographic scan parameters.
-        
-        Parameters:
-        
-        scan_step_npix - 
+    """
+    obj_dist: float
+    pixel_pitch: float
+
+@dataclass(frozen=True)
+class ScanParams:
+    """Convenience class to store the ptychographic scan parameters.
+
+    Attributes
+    ----------
+    scan_step_npix : int
         Number of pixels per step in the raster grid.
-        
-        pixel_pitch - 
-        Width of each individual pixel (in m). 
-        
-        scan_area_buffer_npix - 
-        This is a bit of hack to ensure that the scan area is around the center of the 
-        full-field probe. For e.g., if scan_area_buffer_npix = 20, we start the ptychographic
-        scan from the coordinate (20, 20) of the probe instead of from (0,0). 
-        The regions between x=[0,20] and y=[0,20] are never sampled.
-        
-        Basically, this is like imposing a margin of 20 pixels in the left and bottom of the probe.
-        
-        poisson_noise - 
+    poisson_noise : bool
         Whether to simulate Poisson noise in the diffraction data.
-        """
-        self.scan_step_npix = scan_step_npix
-        self.poisson_noise = poisson_noise
+    """
+    scan_step_npix: int
+    poisson_noise: bool
 
 
 
-class NearFieldSimObjParams(ObjParams): 
-    # Defining the subclasses just for consistent naming
-    pass
+@dataclass(frozen=True)
+class NFSimObjParams(ObjParams): 
+    """Customizing ObjParams with some default parameters for nearfield simulations.
+    
+    Only function is to use the default parameters. Does not extend ObjParams. 
+    
+    See ObjParams for documentation on the individual parameters used.
+    """
+    obj_npix : int = 192
+    mod_range: float = 1.0
+    phase_range: float = np.pi
+    border_npix: int = 32
+    border_const: float = 1.0
 
-class NearFieldSimDetectorParams(DetectorParams):
-    # Defining the subclasses just for consistent naming
-    pass
+@dataclass(frozen=True)
+class NFSimDetectorParams(DetectorParams):
+    """Customizing DetectorParams with some default parameters for nearfield simulations.
+    
+    Only function is to use the default parameters. Does not extend ObjParams. 
+    
+    See ObjParams for documentation on the individual parameters used.."""
+    obj_dist: float = 0.0468
+    pixel_pitch: float = 3e-7
 
-class NearFieldSimProbeParams(ProbeParams):
-    def __init__(self, 
-                 gaussian_intensity_stdev_npix: float = 150.0,
-                 speckle_window_npix: int = 40,
-                 **kwargs) -> None:
-        """Adds parameters specific to the nearfield simulation to the ProbeParams class.
+@dataclass(frozen=True)
+class NFSimProbeParams(ProbeParams):
+    """Customizes ProbeParams with default parameter values and also adds parameters specific to the nearfield simulation.
+    
+    For detail on the other attributes and parameters, refer to the documentation for the ProbeParams class.
         
-        For detail on the other parameters, refer to the documentation for 
-        the ProbeParams class.
-        
-        Additional parameters:
-        
-        gaussian_intensity_stdev_pix - 
-        Standard deviation of the gaussian probe to be used. 
-        See the function getGaussian2D for more detailed information on this 
-        parameter.
-        
-        speckle_window_pix - 
-        The size of the rectangular window used to generate the speckle pattern.
-        See the function getSpeckle for more detail on this parameter. 
-        """
-        
-        super().__init__(**kwargs)
-        self.gaussian_intensity_stdev_npix = gaussian_intensity_stdev_npix
-        self.speckle_window_npix = speckle_window_npix
+    Attributes
+    ----------
+    gaussian_intensity_stdev_pix : float
+        Standard deviation of the gaussian probe to be used. See the function getGaussian2D for more detailed information on this parameter.
+    speckle_window_pix : int
+        The size of the rectangular window used to generate the speckle pattern. See the function getSpeckle for more detail on this parameter. 
+    """
+    wavelength: float = 0.142e-9
+    npix: int = 512
+    photons_flux: float = 1e4
+    gaussian_intensity_stdev_npix: float = 150.0
+    speckle_window_npix: int = 40
 
+@dataclass(frozen=True)
+class NFSimScanParams(ScanParams):
+    r""""Customizes ScanParams with default parameter values and also adds parameters specific to the nearfield simulation.
+    
+    For detail on the other parameters, refer to the documentation for the ScanParams class.
         
-class NearFieldSimScanParams(ScanParams):
-    def __init__(self, 
-                 scan_area_buffer_npix: int = 20,
-                 **kwargs) -> None:
-        """Adds parameters specific to the nearfield simulation to the ScanParams class.
-        
-        For detail on the other parameters, refer to the documentation for 
-        the ScanParams class.
-        
-        Additional parameters:
-
-        scan_area_buffer_npix - 
-        This is a bit of hack to ensure that the scan area is around the center of the 
-        full-field probe. For e.g., if scan_area_buffer_npix = 20, we start the ptychographic
-        scan from the coordinate (20, 20) of the probe instead of from (0,0). 
-        The regions between x=[0,20] and y=[0,20] are never sampled.
-        
+    Attributes
+    ----------
+    scan_area_buffer_npix : int
+        This is a bit of hack to ensure that the scan area is around the center of the full-field probe. For e.g., if scan_area_buffer_npix = 20, we start the ptychographic scan from the coordinate (20, 20) of the probe instead of from (0,0). The regions between x=[0,20] and y=[0,20] are never sampled.
         Basically, this is like imposing a margin of 20 pixels in the left and bottom of the probe.
         
         """
-        super().__init__(**kwargs)
-        self.scan_area_buffer_npix = scan_area_buffer_npix
+    scan_step_npix: int = 44
+    poisson_noise: bool = True
+    scan_area_buffer_npix: int = 20
 
 
 
-class NearFieldPtychographySimulation(object):
+class NFPtychoSimulation(object):
+    r"""Simulate a near-field ptychography simulation using a full-field probe and object translations.
+        
+    I don't know if this is the typical scenario for a near-field ptychography experiment. For this work, I am trying to use a similar setup to that used by Clare et al in [6]_.
+
+    See NFSimObjParams, NFSimProbeParams, NFSimDetectorParams, and NFSimScanParams classes for details on the options available to customize the simulation.
+    
+    Attributes
+    ----------
+    obj_params : NFSimObjParams
+        Parameters for the simulated object.
+    probe_params : NFSimProbeParams
+        Parameters for simulated probe.
+    det_params : NFSimDetectorParams
+        Parameters for simulated detector.
+    scan_params : NFSimScanParams
+        Parameters for the scan grid and noise setup.
+    obj_true: complex ndarray
+        Holds the generated complex valued object.
+    obj_w_border: complex ndarray
+        Holds the generated complex valued object along with the border specified through obj_params.
+    probe_true: complex ndarray
+        Holds the generated complex valued probe.
+    prop_kernel: complex ndarray
+        Holds the (fft-shifted) Fresnel propagation kernel for the simulation parameters. 
+    positions : int ndarray
+        Holds the scan positions (object translations) used for the ptychographic scan.
+    diffraction_mods : float ndarray
+        Holds the modulus of the exit wave at the detector plane for the scan positions. This is just the square root of the intensity pattern at the object plane.
+    
+    Parameters
+    -----------
+    obj_args : dict
+        Dictionary that contains pairs of arguments and values to use to create a custom NFSimObjParams class, and thus change the parameters of the simulated object. 
+    probe_args : dict
+        Dictionary that contains pairs of arguments and values to use to create a custom NFSimProbeParams class, and thus change the parameters of the simulated probe. 
+    detector_args : dict
+        Dictionary that contains pairs of arguments and values to use to create a custom NFSimDetectorParams class, and thus change the parameters of the detector used. 
+    scan_args : dict
+        Dictionary that contains pairs of arguments and values to use to create a custom NFSimScanParams class, and thus change the parameters of the ptychographic scan. 
+
+    Examples
+    --------
+    Input parameter examples: 
+    
+    * If we want to use an object 64 pixels wide, and with of border of 5 pixels on each side, we use: 
+        ``nfsim = NFPtychoSimulation(obj_args={obj_npix:64, border_npix:5})``
+    * If we want to use an object 1024 pixels wide, and with a wavelength of 1 nm, we use:
+        ``nfsim = NFPtychoSimulation(probe_args={probe_npix:1024, wavelength:1e-9})``
+    * If we want to use a detector with pixel pitch 100nm, we use:
+        ``nfsim = NFPtychoSimulation(detector_args={pixel_pitch:100e-9})``
+    * If we want to use a step size of 60 pixels, and generate diffraction patterns without Poisson noise included, we use:
+        ``nfsim = NFPtychoSimulation(scan_args={scan_step_npix:60, poisson_noise=False})``
+
+    References
+    -----------
+    .. [6] Richard M. Clare, Marco Stockmar, Martin Dierolf, Irene Zanette, and Franz Pfeiffer, "Characterization of near-field ptychography," Opt. Express 23, 19728-19742 (2015).
+        
+        """
     def __init__(self,
                  obj_args: dict = {},
                  probe_args: dict = {},
                  detector_args: dict = {},
                  scan_args: dict = {}) -> None:
-        """
-        Simulate a near-field ptychography simulation using a full-field probe and object translations.
-        
-        I don't know if this is the typical scenario for a near-field ptychography experiment. For this work,
-        I am trying to use a similar setup to that used by Clare et al in
-        https://www.osapublishing.org/oe/abstract.cfm?uri=oe-23-15-19728
-        
-        See NearFieldSimObjParams, NearFieldSimProbeParams, NearFieldSimDetectorParams, and 
-        NearFieldSimScanParams classes for details on the options available to customize the 
-        simulation.
-        
-        Parameters:
-        
-        obj_args - 
-        Dictionary that contains pairs of arguments and values to use to create a custom 
-        NearFieldSimObjParams class, and thus change the parameters of the simulated object.
-        E.g. if we want to use an object 64 pixels wide, and with of border of 5 pixels on each
-        side, we use:
-        
-        nfsim = NearFieldPtychographySimulation(obj_args={obj_npix:64, border_npix:5})
-        
-        probe_args - 
-        Dictionary that contains pairs of arguments and values to use to create a custom 
-        NearFieldSimProbeParams class, and thus change the parameters of the simulated probe.
-        E.g. if we want to use an object 1024 pixels wide, and with a wavelength of 1nm, we use:
-        
-        nfsim = NearFieldPtychographySimulation(probe_args={probe_npix:1024, wavelength:1e-9})
-        
-        detector_args - 
-        Dictionary that contains pairs of arguments and values to use to create a custom 
-        NearFieldSimDetectorParams class, and thus change the parameters of the detector used.
-        E.g. if we want to use a detector with pixel pitch 100nm, we use:
-        
-        nfsim = NearFieldPtychographySimulation(detector_args={pixel_pitch:100e-9})
-        
-        scan_args - 
-        Dictionary that contains pairs of arguments and values to use to create a custom 
-        NearFieldSimScanParams class, and thus change the parameters of the ptychographic scan.
-        E.g. if we want to use a step size of 60 pixels, and generate diffraction patterns
-        without Poisson noise included, we use:
-        
-        nfsim = NearFieldPtychographicSimulation(scan_args={scan_step_npix:60, poisson_noise=False})
-        """
-            
-        self.obj_params = NearFieldSimObjParams(**obj_args)
-        self.probe_params = NearFieldSimProbeParams(**probe_args)
-        self.det_params = NearFieldSimDetectorParams(**detector_args)
-        self.scan_params = NearFieldSimScanParams(**scan_args)
+  
+        self.obj_params = NFSimObjParams(**obj_args)
+        self.probe_params = NFSimProbeParams(**probe_args)
+        self.det_params = NFSimDetectorParams(**detector_args)
+        self.scan_params = NFSimScanParams(**scan_args)
         
         self.checkValidity()
         
@@ -493,7 +462,8 @@ class NearFieldPtychographySimulation(object):
         width of the Fresnel zone for the simulation parameters. This ensures that the 
         generated diffraction patterns have enough diversity.
         
-        Need to add more checks here."""
+        Need to add more checks here.
+        """
         
         fresnel_zone_dist = np.sqrt(self.probe_params.wavelength * self.det_params.obj_dist)
         fresnel_zone_npix = fresnel_zone_dist / self.det_params.pixel_pitch
@@ -501,13 +471,10 @@ class NearFieldPtychographySimulation(object):
         error_str = (f"Step size ({self.scan_params.scan_step_npix} is too small. "
                      + f"Ensure that the step size is at least larger than the Fresnel zone width "
                      + f"({fresnel_zone_npix}) to ensure diversity in the diffraction patterns.")
-        assert self.scan_params.scan_step_npix > fresnel_zone_npix, error_str
-               
-        
+        assert self.scan_params.scan_step_npix > fresnel_zone_npix, error_str  
     
     def genPtychographyPositions(self) -> None:
-        """Generate the scan positions for the ptychographic scan.
-        """
+        """Generate the scan positions for the ptychographic scan."""
         
         p1 = self.scan_params.scan_area_buffer_npix
         p2 = self.probe_params.npix - p1 - self.obj_params.obj_w_border_npix
@@ -520,8 +487,7 @@ class NearFieldPtychographySimulation(object):
         self.positions = np.array(positions)
     
     def genDiffractionMods(self) -> None:
-        """Generate the near-field diffraction patterns for the ptychography scan using the transfer function method.
-        """
+        """Generate the near-field diffraction patterns for the ptychography scan using the transfer function method."""
         diffraction_intensities = []
         
         npix_pad = self.probe_params.npix - self.obj_params.obj_w_border_npix
@@ -547,11 +513,23 @@ class NearFieldPtychographySimulation(object):
             scatter_single = ((R % self.probe_params.npix) * self.probe_params.npix + 
                               (C % self.probe_params.npix))
             scatter_indices_all.append(scatter_single)
-        self.scatter_indices =  np.array(scatter_indices_all)
+        scatter_indices =  np.array(scatter_indices_all)
 
 
 
 class tfNearFieldPtychoRecons(object):
+    """Reconstruct the object and probe from a near-field ptychography simulation. 
+
+    Assumes that the probe is full-field, the object is (much) smaller than the probe, and the object is translated within the probe field to generate the diffraction patterns. 
+
+    Assumes square object and probe.
+
+    Uses the gaussian noise model for the loss function. This is easy to change if neeeded.
+
+    Attributes
+    ----------
+    test
+    """
     
     def __init__(self,
                  positions: np.ndarray,
@@ -572,17 +550,7 @@ class tfNearFieldPtychoRecons(object):
                  obj_true: Optional[np.ndarray] = None,
                  probe_true: Optional[np.ndarray] = None) -> None:
                  
-        """Reconstruct the object and probe from a near-field ptychography simulation. 
-        
-        Assumes that the probe is full-field, the object is (much) smaller than the probe, 
-        and the object is translated within the probe field to generate the diffraction patterns. 
-        
-        Assumes square object and probe.
-        
-        Uses the gaussian noise model for the loss function. This is easy to change if neeeded.
-        
-        Parameters:
-        """
+
         
         self.positions = positions
         self.diffraction_mods = diffraction_mods
@@ -891,7 +859,7 @@ class tfNearFieldPtychoRecons(object):
 class tfNearFieldPtychoReconsFromSimulation(tfNearFieldPtychoRecons):
     
     def __init__(self,
-                 simulation: NearFieldPtychographySimulation,
+                 simulation: NFPtychoSimulation,
                  obj_guess: Optional[np.ndarray] = None,
                  probe_guess: Optional[np.ndarray] = None,
                  probe_recons: bool = False,
