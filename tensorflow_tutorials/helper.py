@@ -7,6 +7,7 @@ import tensorflow as tf
 from scipy import special
 import skimage, skimage.transform, skimage.data
 import skimage.feature, skimage.restoration
+from register_translation_3d import register_translation_3d
 
 
 
@@ -195,5 +196,26 @@ def batch_fftshift2d(tensor: tf.Tensor):
 
 
 
+def calcRegistrationError3d(obj_true, obj_test):
+    roll, err, phase = register_translation_3d(obj_test, obj_true, 10)
+    obj_test_2 = obj_test * np.exp(-1j * phase)
+    obj_test_2 = np.roll(obj_test_2, -roll.astype('int'), axis=(0,1,2))
+    roll_2, err_2, phase_2 = register_translation_3d(obj_test_2, obj_true, 10)
+    return roll, err, phase, roll_2, err_2, phase_2
 
+
+
+def getViewIndices3d(obj, positions, npix_r, npix_c):
+    nx, ny, nz = obj.shape
+    views_indices_all = []
+    for py, pz in positions:
+        
+        #for pz in range(nz):
+        #    R, C = np.ogrid[py:npix + py, px:npix + px]
+        #    view_single = (R % obj.shape[0]) * obj.shape[0] + (C % obj.shape[1])
+        X, Y, Z = np.ogrid[0:nx, py:npix_r + py, pz:npix_c + pz]
+        view_single = ((X % nx) * ny + (Y % ny)) * nz + (Z % nz)
+        #print(view_single.shape)
+        views_indices_all.append(view_single)
+    return np.array(views_indices_all)
 
