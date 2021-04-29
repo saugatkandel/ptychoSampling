@@ -1,16 +1,17 @@
 # ptychoSampling
 
-Contains demo code for the paper https://arxiv.org/abs/2103.01767
-
-
 **Contains**:
-
-1. Tutorials for simple ptychography reconstruction applications with tensorflow (contained in
+1. Contains demo code for the paper https://arxiv.org/abs/2103.01767
+2. Tutorials for simple ptychography reconstruction applications with tensorflow (contained in
 [tensorflow_tutorials](https://github.com/saugatkandel/ptychoSampling/tree/master/tensorflow_tutorials)). It is safe to ignore the python package setup procedure.
-2. A generic, modular tensorflow-based simulation and reconstruction framework in [ptychoSampling](https://github.com/saugatkandel/ptychoSampling/tree/master/ptychoSampling). The documentation, however, is quit
+3. A generic, modular tensorflow-based simulation and reconstruction framework in [ptychoSampling](https://github.com/saugatkandel/ptychoSampling/tree/master/ptychoSampling). The documentation, however, is quit
 e sparse and sometimes
  unchanged from that for older versions of the code.
- 3. Simulation and reconstruction examples for far-field cases.
+4. Simulation and reconstruction examples for far-field cases.
+
+**Warning**:
+
+The documentation is completely out-of-date. 
 
 
 **Notes**:
